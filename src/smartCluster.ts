@@ -10,16 +10,12 @@ class ProcessInstance {
   next: ProcessInstance | null = null;
   previous: ProcessInstance | null = null;
 
-  constructor(processReference: ChildProcess) {
-    this.processReference = processReference;
-  }
-
-  wipeDoublyPointers(): void {
+  clearDoublyPointers(): void {
     this.previous = null;
     this.next = null;
   }
 
-  wipeAll(): void {
+  clearAll(): void {
     this.processReference = null;
     this.pid = null;
     this.previous = null;
@@ -35,7 +31,7 @@ class ProcessQueue {
   //adds to the back of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
   addToQueue(processInstance: ProcessInstance): void {
-    if (typeof processInstance.pid !== "number") {
+    if (processInstance.pid === null) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //a simple check to ensure that the process instance has a valid PID, which is crucial for process tracking
@@ -50,13 +46,13 @@ class ProcessQueue {
     if (this.#queueHead === null) {
       this.#queueHead = this.#queueTail = processInstance;
 
-      //if the queue is empty
+      //queue length is 0
     } else {
       processInstance.previous = this.#queueTail;
       this.#queueTail!.next = processInstance;
       this.#queueTail = processInstance;
 
-      //if the queue is not empty
+      //queue length >0
     }
 
     this.#processesInQueue.add(processInstance.pid);
@@ -64,11 +60,12 @@ class ProcessQueue {
 
   //returns the front of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
-  shiftFromQueue(): ProcessInstance {
+  shiftFromQueue(): ProcessInstance | null {
     if (this.#queueHead === null) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+      return null;
 
-      //if the queue head is null, this means the queue tail is null, meaning the queue is empty
+      //if the queue is empty
+      //However, don't throw an error because you want to use the result as a flag in higher level control flow.
     }
 
     const headNode = this.#queueHead;
@@ -76,27 +73,26 @@ class ProcessQueue {
     if (this.#queueHead === this.#queueTail) {
       this.#queueHead = this.#queueTail = null;
 
-      //if the node is the only node in queue
-    } else if (this.#queueHead.next === this.#queueTail) {
-      this.#queueHead = this.#queueTail = this.#queueHead.next;
-      this.#queueHead!.previous = this.#queueHead!.next = null;
-
-      //if the queue length is of length 2 tail becomes new head and tail
+      //queue length of 1
     } else {
       this.#queueHead = this.#queueHead.next;
+      this.#queueHead!.previous = null;
 
-      //the queue length is >2
+      //queue length >1
     }
+
+    this.#processesInQueue.delete(headNode.pid as number);
+    headNode.clearDoublyPointers();
 
     return headNode;
   }
 
   //determines how to alter the queue to remove he supplied process instance from such.
   removeFromQueue(processInstance: ProcessInstance): void {
-    if (typeof processInstance.pid !== "number") {
+    if (processInstance.pid === null) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that the process instance has a valid PID, which is crucial for process tracking
+      //a simple check to ensure that the process instance has a valid pid, which is crucial for process tracking
     }
 
     if (!this.#processesInQueue.has(processInstance.pid)) {
@@ -105,55 +101,85 @@ class ProcessQueue {
       //a simple check to ensure that the process trying to be removed is actually in the queue
     }
 
-    if (this.#queueHead === null && this.#queueTail === null) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-
-      //if the queue is empty, thus it is impossible to delete from the queue
-    }
-
     if (
       processInstance === this.#queueHead &&
       processInstance === this.#queueTail
     ) {
       this.#queueHead = this.#queueTail = null;
 
-      //if the node is the only node of the queue
+      //queue length of 1
     } else if (processInstance === this.#queueHead) {
       this.#queueHead = this.#queueHead.next;
-
-      if (this.#queueHead) {
-        this.#queueHead.previous = null;
-      }
+      this.#queueHead!.previous = null;
 
       //if the node is the current head
     } else if (processInstance === this.#queueTail) {
       this.#queueTail = this.#queueTail.previous;
-
-      if (this.#queueTail) {
-        this.#queueTail.next = null;
-      }
+      this.#queueTail!.next = null;
 
       //if the node is the current tail
     } else {
       processInstance.previous!.next = processInstance.next;
-      processInstance.next!.previous = processInstance.previous; //exclamation points asserts a value being present for the target properties, mainly for TS
-
+      processInstance.next!.previous = processInstance.previous;
       //if the node is in the middle of the queue
     }
 
     this.#processesInQueue.delete(processInstance.pid);
+    processInstance.clearDoublyPointers();
   }
 }
 
 class Task {
-  #instruction: string | null = null;
-  #payload: Object | null = null;
-  #id: number | null = null;
+  instruction: string | null = null;
+  payload: Array<any> | null = null; // array of arguments essentially
+  id: number | null = null;
+
+  clearAll(): void {
+    this.instruction = null;
+    this.payload = null;
+    this.id = null;
+  }
 }
 
+//going to be similar to the process queue in terms of data structure used
 class MessageQueue {
-  #queue: Task[] = [];
+  #queueHead: Task | null = null;
+  #queueTail: Task | null = null;
   #tasksInQueue: Set<number> = new Set<number>();
+
+  addToQueue(task: Task): void {
+    if (task.id === null) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //a simple check to ensure that the task has a valid id
+    }
+
+    if (task.payload === null) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //a simple check to ensure that there is an array of args to be passed
+    }
+
+    if (task.instruction === null) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //a simple check to ensure that the task has a valid instruction
+    }
+
+    if (this.#tasksInQueue.has(task.id)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    //ADD LOGIC HERE
+  }
+
+  shiftFromQueue(): Task | null {
+    //ADD LOGIC HERE
+  }
+
+  removeFromQueue(task: Task): void {
+    //ADD LOGIC HERE
+  }
 }
 
 class SmartCluster {
@@ -171,6 +197,7 @@ class SmartCluster {
   //for managing empty task objects and number of task objects present,
   //because options for defining preallocated tasks objects, as well as an upper limit to the
   //number of tasks that can exist in the queue will exist
+  #taskInstanceMap = new Map();
   #emptyTaskInstances: Task[] = [];
   #numOfTaskObjs: number = 0;
 
