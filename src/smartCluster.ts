@@ -38,7 +38,7 @@ class ProcessQueue {
       //FATAL ERROR
     }
 
-    if (!processInstance.pid) {
+    if (typeof processInstance.pid !== "number") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //to ensure that the process instance has a valid PID, which is crucial for process tracking
@@ -52,7 +52,7 @@ class ProcessQueue {
       //FATAL ERROR
     }
 
-    if (this.#queueHead === null) {
+    if (!(this.#queueHead instanceof ProcessInstance)) {
       this.#queueHead = this.#queueTail = processInstance;
 
       //queue length is 0
@@ -70,7 +70,7 @@ class ProcessQueue {
   //returns the front of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
   shiftFromQueue(): ProcessInstance | null {
-    if (!this.#queueHead) {
+    if (!(this.#queueHead instanceof Task)) {
       return null;
 
       //if the queue is empty
@@ -97,7 +97,7 @@ class ProcessQueue {
 
   //determines how to alter the queue to remove he supplied process instance from such.
   removeFromQueue(processInstance: ProcessInstance): void {
-    if (!processInstance.pid) {
+    if (typeof processInstance.pid !== "number") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //to ensure that the process instance has a valid PID, which is crucial for process tracking
@@ -131,6 +131,7 @@ class ProcessQueue {
     } else {
       processInstance.previous!.next = processInstance.next;
       processInstance.next!.previous = processInstance.previous;
+
       //if the node is in the middle of the queue
     }
 
@@ -159,35 +160,31 @@ class MessageQueue {
   #tasksInQueue: Set<number> = new Set<number>();
 
   addToQueue(task: Task): void {
-    if (task.id === null) {
+    if (typeof task.id !== "number") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //to ensure that the task has a valid id
       //FATAL ERROR
     }
 
-    if (task.payload === null) {
+    if (!Array.isArray(task.payload)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //to ensure that there is an array of args to be passed
       //FATAL ERROR
     }
 
-    if (task.instruction === null) {
+    if (typeof task.instruction !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //to ensure that the task has a valid instruction
       //FATAL ERROR
     }
 
     if (this.#tasksInQueue.has(task.id)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //to ensure that the task is not already in the queue
       //FATAL ERROR
     }
 
-    if (this.#queueHead === null) {
+    if (!this.#queueHead) {
       this.#queueHead = this.#queueTail = task;
 
       //queue length is 0
@@ -203,7 +200,7 @@ class MessageQueue {
   }
 
   shiftFromQueue(): Task | null {
-    if (!this.#queueHead) {
+    if (!(this.#queueHead instanceof Task)) {
       return null;
 
       //if the queue is empty
@@ -229,7 +226,40 @@ class MessageQueue {
   }
 
   removeFromQueue(task: Task): void {
-    //ADD LOGIC HERE
+    if (typeof task.id !== "number") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //FATAL ERROR
+    }
+
+    if (!this.#tasksInQueue.has(task.id)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //FATAL ERROR
+    }
+
+    if (task === this.#queueHead && task === this.#queueTail) {
+      this.#queueHead = this.#queueTail = null;
+
+      //if the node is both the head and tail (queue length of 1)
+    } else if (task === this.#queueHead) {
+      this.#queueHead = this.#queueHead.next;
+      this.#queueHead!.previous = null;
+
+      //if the node is the current head
+    } else if (task === this.#queueTail) {
+      this.#queueTail = this.#queueTail.previous;
+      this.#queueTail!.next = null;
+
+      //if the node is the current tail
+    } else {
+      task.previous!.next = task.next;
+      task.next!.previous = task.previous;
+
+      //if the node is in the middle of the queue
+    }
+
+    this.#tasksInQueue.delete(task.id);
   }
 }
 
