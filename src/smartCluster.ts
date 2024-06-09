@@ -31,16 +31,25 @@ class ProcessQueue {
   //adds to the back of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
   addToQueue(processInstance: ProcessInstance): void {
-    if (processInstance.pid === null) {
+    if (!(processInstance.processReference instanceof ChildProcess)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that the process instance has a valid PID, which is crucial for process tracking
+      //to ensure the process is a valid process, and not null
+      //FATAL ERROR
+    }
+
+    if (!processInstance.pid) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //to ensure that the process instance has a valid PID, which is crucial for process tracking
+      //FATAL ERROR
     }
 
     if (this.#processesInQueue.has(processInstance.pid)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that processes already in queue aren't added again
+      //to ensure that processes already in queue aren't added again
+      //FATAL ERROR
     }
 
     if (this.#queueHead === null) {
@@ -61,11 +70,11 @@ class ProcessQueue {
   //returns the front of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
   shiftFromQueue(): ProcessInstance | null {
-    if (this.#queueHead === null) {
+    if (!this.#queueHead) {
       return null;
 
       //if the queue is empty
-      //However, don't throw an error because you want to use the result as a flag in higher level control flow.
+      //However, don't throw an error, rather return null for control flow
     }
 
     const headNode = this.#queueHead;
@@ -82,23 +91,24 @@ class ProcessQueue {
     }
 
     this.#processesInQueue.delete(headNode.pid as number);
-    headNode.clearDoublyPointers();
 
     return headNode;
   }
 
   //determines how to alter the queue to remove he supplied process instance from such.
   removeFromQueue(processInstance: ProcessInstance): void {
-    if (processInstance.pid === null) {
+    if (!processInstance.pid) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that the process instance has a valid pid, which is crucial for process tracking
+      //to ensure that the process instance has a valid PID, which is crucial for process tracking
+      //FATAL ERROR
     }
 
     if (!this.#processesInQueue.has(processInstance.pid)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that the process trying to be removed is actually in the queue
+      //to ensure that the process trying to be removed is actually in the queue
+      //FATAL ERROR
     }
 
     if (
@@ -107,7 +117,7 @@ class ProcessQueue {
     ) {
       this.#queueHead = this.#queueTail = null;
 
-      //queue length of 1
+      //if the node is both the head and tail (queue length of 1)
     } else if (processInstance === this.#queueHead) {
       this.#queueHead = this.#queueHead.next;
       this.#queueHead!.previous = null;
@@ -125,7 +135,6 @@ class ProcessQueue {
     }
 
     this.#processesInQueue.delete(processInstance.pid);
-    processInstance.clearDoublyPointers();
   }
 }
 
@@ -133,6 +142,8 @@ class Task {
   instruction: string | null = null;
   payload: Array<any> | null = null; // array of arguments essentially
   id: number | null = null;
+  next: Task | null = null;
+  previous: Task | null = null;
 
   clearAll(): void {
     this.instruction = null;
@@ -151,30 +162,70 @@ class MessageQueue {
     if (task.id === null) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that the task has a valid id
+      //to ensure that the task has a valid id
+      //FATAL ERROR
     }
 
     if (task.payload === null) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that there is an array of args to be passed
+      //to ensure that there is an array of args to be passed
+      //FATAL ERROR
     }
 
     if (task.instruction === null) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //a simple check to ensure that the task has a valid instruction
+      //to ensure that the task has a valid instruction
+      //FATAL ERROR
     }
 
     if (this.#tasksInQueue.has(task.id)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //to ensure that the task is not already in the queue
+      //FATAL ERROR
     }
 
-    //ADD LOGIC HERE
+    if (this.#queueHead === null) {
+      this.#queueHead = this.#queueTail = task;
+
+      //queue length is 0
+    } else {
+      task.previous = this.#queueTail;
+      this.#queueTail!.next = task;
+      this.#queueTail = task;
+
+      //queue length >0
+    }
+
+    this.#tasksInQueue.add(task.id);
   }
 
   shiftFromQueue(): Task | null {
-    //ADD LOGIC HERE
+    if (!this.#queueHead) {
+      return null;
+
+      //if the queue is empty
+      //However, don't throw an error, rather return null for control flow
+    }
+
+    const headNode = this.#queueHead;
+
+    if (this.#queueHead === this.#queueTail) {
+      this.#queueHead = this.#queueTail = null;
+
+      //queue length of 1
+    } else {
+      this.#queueHead = this.#queueHead.next;
+      this.#queueHead!.previous = null;
+
+      //queue length >1
+    }
+
+    this.#tasksInQueue.delete(headNode.id as number);
+
+    return headNode;
   }
 
   removeFromQueue(task: Task): void {
