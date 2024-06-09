@@ -1,4 +1,5 @@
 import { fork, ChildProcess } from "child_process";
+import { nanoid } from "nanoid";
 
 class Process {
   //For creating doubly linked list nodes for a process queue.
@@ -111,10 +112,7 @@ class ProcessQueue {
       //FATAL ERROR
     }
 
-    if (
-      process === this.#queueHead &&
-      process === this.#queueTail
-    ) {
+    if (process === this.#queueHead && process === this.#queueTail) {
       this.#queueHead = this.#queueTail = null;
 
       //if the node is both the head and tail (queue length of 1)
@@ -142,7 +140,7 @@ class ProcessQueue {
 class Task {
   instruction: string | null = null;
   payload: Array<any> | null = null; // array of arguments essentially
-  id: number | null = null;
+  id: string | null = null;
   next: Task | null = null;
   previous: Task | null = null;
 
@@ -154,13 +152,13 @@ class Task {
 }
 
 //going to be similar to the process queue in terms of data structure used
-class MessageQueue {
+class TaskQueue {
   #queueHead: Task | null = null;
   #queueTail: Task | null = null;
-  #tasksInQueue: Set<number> = new Set<number>();
+  #tasksInQueue: Set<string> = new Set<string>();
 
   addToQueue(task: Task): void {
-    if (typeof task.id !== "number") {
+    if (typeof task.id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //FATAL ERROR
@@ -220,13 +218,13 @@ class MessageQueue {
       //queue length >1
     }
 
-    this.#tasksInQueue.delete(headNode.id as number);
+    this.#tasksInQueue.delete(headNode.id as string);
 
     return headNode;
   }
 
   removeFromQueue(task: Task): void {
-    if (typeof task.id !== "number") {
+    if (typeof task.id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //FATAL ERROR
@@ -263,24 +261,133 @@ class MessageQueue {
   }
 }
 
+class ProcessManager {
+  //for managing each valid process object, which contains the actual process reference internally,
+  //as well as the doubly pointers used in the process queue.
+
+  #processes: Map<number, Process> = new Map<number, Process>();
+  #queue: ProcessQueue = new ProcessQueue();
+  #emptyObjs: Process[] = [];
+
+  constructor(targetProcesses: number) {
+    for (let i = 0; i < targetProcesses; i++) {
+      this.#initProcess();
+    }
+  }
+
+  #initProcess() {}
+}
+
+class TaskManager {
+  //for managing empty task objects and number of task objects present,
+  //because options for defining preallocated tasks objects, as well as an upper limit to the
+  //number of tasks that can exist in the queue will exist
+
+  #tasks: Map<string, Task> = new Map();
+  #queue: TaskQueue = new TaskQueue();
+  #emptyObjs: Task[] = [];
+  #numOfTaskObjs: number = 0;
+  #preallocObjs: number = 0;
+  #maxallocObjs: number = 0;
+
+  constructor(preallocObjs: number, maxallocObjs: number) {
+    if (maxallocObjs < preallocObjs) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#preallocObjs = preallocObjs;
+    this.#maxallocObjs = maxallocObjs;
+
+    for (let i = 0; i < preallocObjs; i++) {
+      this.#emptyObjs.push(new Task());
+    }
+  }
+
+  //RETURNS THE TASK ID
+  #createNewTaskObj(taskLabel: string, args: Array<any>) {
+    if (this.#numOfTaskObjs > this.#maxallocObjs) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //If this error throws, this means that there is more tasks queued
+      //than what is defined on the max task limit
+    }
+
+    let generatedId = "";
+
+    do {
+      generatedId = nanoid();
+
+      //for presenting potential ID collisions, even if such
+      //is already pretty small
+    } while (this.#tasks.has(generatedId));
+
+    const taskObj = new Task();
+    taskObj.id = generatedId;
+
+    //ADD LOGIC HERE
+  }
+
+  //RETURNS THE TASK ID
+  #reuseTaskObj(taskLabel: string, args: Array<any>) {
+    const emptyTask = this.#emptyObjs.shift();
+
+    //ADD LOGIC HERE
+  }
+
+  addTask(taskLabel: string, args: Array<any>): void {
+    if (this.#emptyObjs.length === 0) {
+      return this.#createNewTaskObj(taskLabel, args); //RETURNS THE TASK ID
+    } else {
+      return this.#reuseTaskObj(taskLabel, args); //RETURNS THE TASK ID
+    }
+  }
+
+  getNextTask(): Task | null {
+    return this.#queue.shiftFromQueue();
+  }
+
+  removeTask(id: string): void {
+    const task = this.#tasks.get(id);
+
+    if (!task) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //checking if the corresponding task actually exists
+    }
+
+    this.#queue.removeFromQueue(task);
+    task.clearAll();
+    this.#tasks.delete(id);
+
+    //for proper GC in case of object surplus
+    if (this.#numOfTaskObjs > this.#preallocObjs) {
+      this.#numOfTaskObjs--;
+    } else {
+      this.#emptyObjs.push(task);
+    }
+  }
+
+  requeueTask(id: string): void {
+    const task = this.#tasks.get(id);
+
+    if (!task) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+
+      //checking if the corresponding task actually exists
+    }
+
+    this.#queue.removeFromQueue(task);
+    this.#queue.addToQueue(task);
+  }
+}
+
 class SmartCluster {
   //for managing each task promise created, which these promises are delegated to the child processes,
   //automatically managing load balancing. The key is the arbitrary promise ID, and the value is the promise APIs resolve and reject.
   //The promise ID is passed to the child, paired with the task to execute. The child process passes this same promise ID back, which allows
   //messages to main process to be associated with specific promises.
   #messagePromises = new Map();
-
-  //for managing each valid process object, which contains the actual process reference internally,
-  //as well as the doubly pointers used in the process queue.
-  #processInstanceMap = new Map<number, Process>();
-  #emptyProcessInstances: Process[] = [];
-
-  //for managing empty task objects and number of task objects present,
-  //because options for defining preallocated tasks objects, as well as an upper limit to the
-  //number of tasks that can exist in the queue will exist
-  #taskInstanceMap = new Map();
-  #emptyTaskInstances: Task[] = [];
-  #numOfTaskObjs: number = 0;
+  #processToTask = new Map();
 
   constructor(pageSource: string, numOfProcesses: number) {}
 }
