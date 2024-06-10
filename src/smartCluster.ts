@@ -138,15 +138,15 @@ class ProcessQueue {
 }
 
 class Task {
-  instruction: string | null = null;
-  payload: Array<any> | null = null; // array of arguments essentially
+  taskLabel: string | null = null;
+  args: Array<any> | null = null; // array of arguments essentially
   id: string | null = null;
   next: Task | null = null;
   previous: Task | null = null;
 
   clearAll(): void {
-    this.instruction = null;
-    this.payload = null;
+    this.taskLabel = null;
+    this.args = null;
     this.id = null;
   }
 }
@@ -164,13 +164,13 @@ class TaskQueue {
       //FATAL ERROR
     }
 
-    if (!Array.isArray(task.payload)) {
+    if (!Array.isArray(task.args)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //FATAL ERROR
     }
 
-    if (typeof task.instruction !== "string") {
+    if (typeof task.taskLabel !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //FATAL ERROR
@@ -291,6 +291,10 @@ class TaskManager {
   #maxallocObjs: number = 0;
 
   constructor(preallocObjs: number, maxallocObjs: number) {
+    if (preallocObjs < 0) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
     if (maxallocObjs < preallocObjs) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
@@ -303,16 +307,8 @@ class TaskManager {
     }
   }
 
-  //RETURNS THE TASK ID
-  #createNewTaskObj(taskLabel: string, args: Array<any>) {
-    if (this.#numOfTaskObjs > this.#maxallocObjs) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-
-      //If this error throws, this means that there is more tasks queued
-      //than what is defined on the max task limit
-    }
-
-    let generatedId = "";
+  #initTaskObj(taskObj: Task, taskLabel: string, args: Array<any>): string {
+    let generatedId: string;
 
     do {
       generatedId = nanoid();
@@ -321,24 +317,37 @@ class TaskManager {
       //is already pretty small
     } while (this.#tasks.has(generatedId));
 
-    const taskObj = new Task();
     taskObj.id = generatedId;
+    taskObj.args = args;
+    taskObj.taskLabel = taskLabel;
 
-    //ADD LOGIC HERE
+    this.#queue.addToQueue(taskObj);
+
+    return generatedId;
   }
 
   //RETURNS THE TASK ID
-  #reuseTaskObj(taskLabel: string, args: Array<any>) {
-    const emptyTask = this.#emptyObjs.shift();
+  addTask(taskLabel: string, args: Array<any>): string {
+    if (this.#emptyObjs.length <= 0) {
+      if (this.#numOfTaskObjs > this.#maxallocObjs) {
+        throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-    //ADD LOGIC HERE
-  }
+        //If this error throws, this means that there is more tasks queued
+        //than what is defined on the max task limit
+      }
 
-  addTask(taskLabel: string, args: Array<any>): void {
-    if (this.#emptyObjs.length === 0) {
-      return this.#createNewTaskObj(taskLabel, args); //RETURNS THE TASK ID
+      const newTaskObj = new Task();
+
+      this.#numOfTaskObjs++;
+
+      return this.#initTaskObj(newTaskObj, taskLabel, args);
+
+      //up to this point, means a new task was successfully allocated, but is
+      //above the preallocation level.
     } else {
-      return this.#reuseTaskObj(taskLabel, args); //RETURNS THE TASK ID
+      const emptyTaskObj = this.#emptyObjs.shift();
+
+      return this.#initTaskObj(emptyTaskObj as Task, taskLabel, args);
     }
   }
 
