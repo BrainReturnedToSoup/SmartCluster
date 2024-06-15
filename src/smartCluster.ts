@@ -254,7 +254,7 @@ class TaskQueue {
     this.#tasksInQueue.set(id, taskObj);
   }
 
-  shiftFromQueue(): Task | null {
+  shiftFromQueue(): string | null {
     if (!(this.#queueHead instanceof Task)) {
       return null;
 
@@ -278,7 +278,7 @@ class TaskQueue {
     this.#tasksInQueue.delete(headNode.id as string);
     this.#collectTaskObj(headNode);
 
-    return headNode;
+    return headNode.id;
   }
 
   removeFromQueue(id: string): void {
@@ -318,159 +318,108 @@ class TaskQueue {
   }
 }
 
+class ProcessManager {}
+
 class TaskManager {
   //for managing empty task objects and number of task objects present,
   //because options for defining preallocated tasks objects, as well as an upper limit to the
   //number of tasks that can exist in the queue will exist
 
-  #tasks: Map<string, Task> = new Map<string, Task>();
-  #queue: TaskQueue = new TaskQueue();
-  #emptyObjs: Task[] = [];
-  #numOfTaskObjs: number = 0;
-  #preallocObjs: number = 0;
-  #maxallocObjs: number = 0;
+  #taskLabels: Map<string, string> = new Map<string, string>();
+  #taskArgs: Map<string, Array<any>> = new Map<string, Array<any>>();
+  #queue: TaskQueue;
 
-  constructor(preallocObjs: number, maxallocObjs: number) {
+  constructor(preallocObjs: number, maxObjs: number) {
     if (preallocObjs < 0) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (maxallocObjs < preallocObjs) {
+    if (maxObjs < preallocObjs) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    this.#preallocObjs = preallocObjs;
-    this.#maxallocObjs = maxallocObjs;
-
-    for (let i = 0; i < preallocObjs; i++) {
-      this.#emptyObjs.push(new Task());
-    }
+    this.#queue = new TaskQueue(preallocObjs, maxObjs);
   }
 
-  #initTaskObj(taskObj: Task, taskLabel: string, args: Array<any>): Task {
-    let generatedId: string;
+  //returns the id string corresponding to the created task
+  createTask(taskLabel: string, args: Array<any>): string {
+    if (typeof taskLabel !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (!Array.isArray(args)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    let id: string;
 
     do {
-      generatedId = nanoid();
+      id = nanoid();
 
-      //for preventing potential ID collisions, even if the chance is pretty small
-    } while (this.#tasks.get(generatedId)); //get() is faster than has()
+      //ensures no collision of IDs, even if the chance is really small
+    } while (!this.#taskLabels.get(id)); //get() is faster than has()
 
-    taskObj.id = generatedId;
-    taskObj.args = args;
-    taskObj.taskLabel = taskLabel;
+    this.#taskLabels.set(id, taskLabel);
+    this.#taskArgs.set(id, args);
 
-    return taskObj;
+    return id;
   }
 
-  createTask(taskLabel: string, args: Array<any>): Task {
-    if (this.#emptyObjs.length === 0) {
-      if (this.#numOfTaskObjs >= this.#maxallocObjs) {
-        throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-
-        //If this error throws, this means that the number of
-        //task objects was going to exceed the defined limit
-      }
-
-      const newTaskObj = new Task();
-
-      this.#numOfTaskObjs++;
-
-      return this.#initTaskObj(newTaskObj, taskLabel, args);
-
-      //up to this point, means a new task was successfully allocated, but is
-      //above the preallocation level.
-    } else {
-      const emptyTaskObj = this.#emptyObjs.shift();
-
-      return this.#initTaskObj(emptyTaskObj as Task, taskLabel, args);
-    }
-  }
-
-  addToQueue(task: Task): void {
-    if (typeof task.id !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (!Array.isArray(task.args)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (typeof task.taskLabel !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (task.previous) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (task.next) {
+  addToQueue(id: string): void {
+    if (typeof id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
     //get() is faster than has()
-    if (!this.#tasks.get(task.id)) {
+    if (!this.#taskLabels.get(id)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
     //the task object supplied has to have all valid properties, and empty doubly pointers
-    this.#queue.addToQueue(task);
+    this.#queue.addToQueue(id);
   }
 
-  getNextTask(): Task | null {
+  getNextTaskId(): string | null {
     return this.#queue.shiftFromQueue();
   }
 
-  deleteTask(task: Task): void {
-    if (typeof task.id !== "string") {
+  deleteTask(id: string): void {
+    if (typeof id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (!Array.isArray(task.args)) {
+    if (!this.#taskLabels.get(id)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (typeof task.taskLabel !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    //get() is faster than has()
-    if (!this.#tasks.has(task.id)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#queue.removeFromQueue(task);
-    this.#tasks.delete(task.id);
-    task.clearAll();
-
-    //for proper GC in case of object surplus
-    if (this.#numOfTaskObjs > this.#preallocObjs) {
-      this.#numOfTaskObjs--;
-    } else {
-      this.#emptyObjs.push(task);
-    }
+    this.#queue.removeFromQueue(id);
+    this.#taskLabels.delete(id);
+    this.#taskArgs.delete(id);
   }
 
-  requeueTask(task: Task): void {
-    if (typeof task.id !== "string") {
+  requeueTask(id: string): void {
+    if (typeof id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (!Array.isArray(task.args)) {
+    if (!this.#taskLabels.get(id)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (typeof task.taskLabel !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+    this.#queue.removeFromQueue(id);
+    this.#queue.addToQueue(id);
+  }
 
-    //get() is faster than has()
-    if (!this.#tasks.get(task.id)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  getTaskLabel(id: string): string | null {
+    const taskLabel = this.#taskLabels.get(id);
 
-    this.#queue.removeFromQueue(task);
-    this.#queue.addToQueue(task);
+    return taskLabel ? taskLabel : null;
+  }
+
+  getArgs(id: string): Array<any> | null {
+    const args = this.#taskArgs.get(id);
+
+    return Array.isArray(args) ? [...args] : null; //return a clone of the array instead of the reference
   }
 }
 
