@@ -6,12 +6,12 @@ class Process {
   //The doubly characteristic is for the goal of using a hashmap
   //to quickly reference nodes on their pid
 
-  pid: number | null = null;
+  id: string | null = null;
   next: Process | null = null;
   previous: Process | null = null;
 
   clearAll(): void {
-    this.pid = null;
+    this.id = null;
     this.previous = null;
     this.next = null;
   }
@@ -21,7 +21,7 @@ class ProcessQueue {
   #queueHead: Process | null = null;
   #queueTail: Process | null = null;
   #emptyProcessObjs: Process[] = [];
-  #processesInQueue: Map<number, Process> = new Map<number, Process>();
+  #processesInQueue: Map<string, Process> = new Map<string, Process>();
 
   constructor(numOfProcesses: number) {
     for (let i = 0; i < numOfProcesses; i++) {
@@ -36,15 +36,15 @@ class ProcessQueue {
 
   //adds to the back of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
-  add(pid: number): void {
-    if (typeof pid !== "number") {
+  add(id: string): void {
+    if (typeof id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //since TS transpiles to JS, this ensures runtime safety
     }
 
     //get() is faster than has()
-    if (this.#processesInQueue.get(pid)) {
+    if (this.#processesInQueue.get(id)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //to ensure that processes already in queue aren't added again
@@ -59,7 +59,7 @@ class ProcessQueue {
       //if this throws, this shows a larger logical error from the source using this api
     }
 
-    emptyProcessObj.pid = pid;
+    emptyProcessObj.id = id;
 
     if (!(this.#queueHead instanceof Process)) {
       this.#queueHead = this.#queueTail = emptyProcessObj;
@@ -73,12 +73,12 @@ class ProcessQueue {
       //queue length >0
     }
 
-    this.#processesInQueue.set(pid, emptyProcessObj);
+    this.#processesInQueue.set(id, emptyProcessObj);
   }
 
   //returns the front of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
-  shift(): number | null {
+  shift(): string | null {
     if (!(this.#queueHead instanceof Process)) {
       return null;
 
@@ -99,23 +99,23 @@ class ProcessQueue {
       //queue length >1
     }
 
-    const pid = headNode.pid;
+    const id = headNode.id;
 
-    this.#processesInQueue.delete(pid as number);
+    this.#processesInQueue.delete(id as string);
     this.#collectProcessObj(headNode);
 
-    return pid;
+    return id;
   }
 
   //determines how to alter the queue to remove he supplied process instance from such.
-  remove(pid: number): void {
-    if (typeof pid !== "number") {
+  remove(id: string): void {
+    if (typeof id !== "number") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //since TS transpiles to JS, this ensures runtime safety
     }
 
-    const process = this.#processesInQueue.get(pid);
+    const process = this.#processesInQueue.get(id);
 
     //get() is faster than has()
     if (!process) {
@@ -145,17 +145,23 @@ class ProcessQueue {
       //if the node is in the middle of the queue
     }
 
-    this.#processesInQueue.delete(pid);
+    this.#processesInQueue.delete(id);
     this.#collectProcessObj(process);
   }
 }
 
 class Task {
   id: string | null = null;
+  prealloc: boolean;
+
   next: Task | null = null;
   previous: Task | null = null;
 
-  clearAll(): void {
+  constructor(preallocFlag: boolean) {
+    this.prealloc = preallocFlag;
+  }
+
+  clearIdAndPointers(): void {
     this.id = null;
     this.next = null;
     this.previous = null;
@@ -169,12 +175,12 @@ class TaskQueue {
 
   #emptyTaskObjs: Task[] = [];
   #preallocObjs: number;
-  #currObjs: number;
   #maxObjs: number;
+  #currObjs: number = 0;
 
   #tasksInQueue: Map<string, Task> = new Map<string, Task>();
 
-  constructor(preallocObjs: number, maxObjs: number) {
+  constructor(preallocObjs: number = 0, maxObjs: number = 0) {
     if (typeof preallocObjs !== "number") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
@@ -185,49 +191,59 @@ class TaskQueue {
 
     this.#preallocObjs = preallocObjs;
     this.#maxObjs = maxObjs;
+
+    for (let i = 0; i < this.#preallocObjs; i++) {
+      this.#emptyTaskObjs.push(new Task(true));
+      this.#currObjs++;
+    }
   }
 
   #getTaskObj(): Task {
     if (this.#currObjs >= this.#maxObjs) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
-      //in the case that the current number of task objects will exceed the max limit if another were to be created
+      //in the case that the current number of task objects will exceed the max limit if another were to be created.
     }
 
-    if (this.#currObjs >= this.#preallocObjs) {
-      const taskObj = new Task();
+    const retrieved = this.#emptyTaskObjs.shift();
+
+    if (retrieved) {
+      return retrieved;
+
+      //in this case, means there is a free task object to use from the empty task pool, which can
+      //happen if there are only prealloc objects to use, or if a prealloc object was returned after use
+      //while the current object value is above the prealloc value, but not the max limit.
+    } else {
+      const created = new Task(false);
 
       this.#currObjs++;
 
-      return taskObj;
+      return created;
 
-      //in this case, create a new object that exceeds the prealloc limit, but not the max
+      //in this case, create a new object that exceeds the prealloc limit, but not the max, because there aren't
+      //any task objects that can be reused at this point.
     }
-
-    //up to this point, means there must be empty task objects that can be used
-
-    const taskObj = this.#emptyTaskObjs.shift();
-
-    if (!taskObj) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-
-      //this shouldn't throw, but if it does, means there is something very wrong with the memory pooling logic
-    }
-
-    return taskObj;
   }
 
   #collectTaskObj(task: Task): void {
-    task.clearAll();
+    if (!(task instanceof Task)) {
+      throw new Error();
+    }
 
-    if (this.#currObjs > this.#preallocObjs) {
-      this.#currObjs--;
-    } else {
+    task.clearIdAndPointers();
+
+    if (task.prealloc) {
       this.#emptyTaskObjs.push(task);
+
+      //means the task object supplied was an original preallocated object, so return
+      //it to the empty task object array for a better chance at cache locality optimization.
+    } else {
+      this.#currObjs--;
+      //means the current objects value has to be greater than the preallocated objects value
     }
   }
 
-  addToQueue(id: string): void {
+  add(id: string): void {
     if (typeof id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
@@ -254,7 +270,7 @@ class TaskQueue {
     this.#tasksInQueue.set(id, taskObj);
   }
 
-  shiftFromQueue(): string | null {
+  shift(): string | null {
     if (!(this.#queueHead instanceof Task)) {
       return null;
 
@@ -262,7 +278,7 @@ class TaskQueue {
       //However, don't throw an error, rather return null for control flow
     }
 
-    const headNode = this.#queueHead;
+    const head = this.#queueHead;
 
     if (this.#queueHead === this.#queueTail) {
       this.#queueHead = this.#queueTail = null;
@@ -275,13 +291,13 @@ class TaskQueue {
       //queue length >1
     }
 
-    this.#tasksInQueue.delete(headNode.id as string);
-    this.#collectTaskObj(headNode);
+    this.#tasksInQueue.delete(head.id as string);
+    this.#collectTaskObj(head);
 
-    return headNode.id;
+    return head.id;
   }
 
-  removeFromQueue(id: string): void {
+  remove(id: string): void {
     if (typeof id !== "string") {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
@@ -318,7 +334,163 @@ class TaskQueue {
   }
 }
 
-class ProcessManager {}
+class ProcessManager {
+  #childProcesses: Map<string, ChildProcess> = new Map<string, ChildProcess>();
+  #processQueue: ProcessQueue;
+
+  constructor(numOfProcesses: number = 0) {
+    if (typeof numOfProcesses !== "number") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (numOfProcesses <= 0) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#processQueue = new ProcessQueue(numOfProcesses);
+  }
+
+  #subscriber: Function | null = null;
+
+  #emit(
+    event: string,
+    processId: string,
+    message: Object | null = null,
+    code: number | null = null,
+    signal: string | number | null = null
+  ) {
+    if (typeof this.#subscriber !== "function") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#subscriber(event, processId, message, code, signal);
+  }
+
+  subscribe(subFunc: Function) {
+    this.#subscriber = subFunc;
+  }
+
+  #initChildProcess(processId: string, pageSource: string): Promise<any> {
+    const managerScope = this;
+
+    return new Promise((resolve, reject) => {
+      const childProcess = fork(pageSource);
+
+      childProcess.on("exit", (code, signal) => {
+        managerScope.#processQueue.remove(processId);
+
+        managerScope.#childProcesses.delete(processId);
+
+        this.#emit("exit", processId, null, code, signal);
+
+        //emit the event to alert the parent class 'SmartCluster' that a process exited, and to thus
+        //invoke the necessary apis for process and task recovery.
+      });
+
+      childProcess.on("error", (err) => {
+        reject(err);
+
+        //app breaking exception
+      });
+
+      childProcess.on("message", (message) => {
+        this.#emit("message", processId, message, null, null);
+
+        //emit the event to alert the parent class 'SmartCluster' that the process finished a task, and to
+        //thus invoke the necessary apis to either send the process on the next available task, or to add the process
+        //to the process queue
+      });
+
+      childProcess.on("spawn", () => {
+        managerScope.#childProcesses.set(processId, childProcess);
+
+        this.#emit("spawn", processId, null, null, null);
+        //emit the event to alert the parent class 'SmartCluster' that the process has spawned completely and is ready to
+        //be used, and to thus invoke the necessary apis to either give the new process a task, or to add the process to the
+        //process queue.
+
+        resolve(null); //resolves the ovearching promise, which is important for child process initialization.
+      });
+    });
+  }
+
+  async createProcess(pageSource: string) {
+    if (typeof pageSource !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    let processId: string;
+
+    do {
+      processId = nanoid();
+
+      //ensures no collision of IDs, even if the chance is really small
+    } while (!this.#childProcesses.get(processId)); //get() is faster than has()
+
+    await this.#initChildProcess(processId, pageSource);
+
+    return processId;
+  }
+
+  addToQueue(processId: string): void {
+    if (typeof processId !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (!this.#childProcesses.get(processId)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#processQueue.add(processId);
+  }
+
+  getNextProcessId(): string | null {
+    return this.#processQueue.shift();
+
+    //if an ID is returned, it was removed from the queue on the shift
+  }
+
+  killProcess(processId: string): void {
+    if (typeof processId !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    const process = this.#childProcesses.get(processId);
+
+    if (!process) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    process.kill();
+  }
+
+  sendToProcess(
+    processId: string,
+    taskId: string,
+    taskLabel: string,
+    args: Array<any>
+  ): void {
+    if (typeof processId !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (typeof taskLabel !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (!Array.isArray(args)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    const childProcess = this.#childProcesses.get(processId);
+
+    if (!childProcess) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    childProcess.send({ taskId, taskLabel, args });
+  }
+}
 
 class TaskManager {
   //for managing empty task objects and number of task objects present,
@@ -327,7 +499,7 @@ class TaskManager {
 
   #taskLabels: Map<string, string> = new Map<string, string>();
   #taskArgs: Map<string, Array<any>> = new Map<string, Array<any>>();
-  #queue: TaskQueue;
+  #taskQueue: TaskQueue;
 
   constructor(preallocObjs: number, maxObjs: number) {
     if (preallocObjs < 0) {
@@ -338,7 +510,7 @@ class TaskManager {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    this.#queue = new TaskQueue(preallocObjs, maxObjs);
+    this.#taskQueue = new TaskQueue(preallocObjs, maxObjs);
   }
 
   //returns the id string corresponding to the created task
@@ -351,18 +523,18 @@ class TaskManager {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    let id: string;
+    let taskId: string;
 
     do {
-      id = nanoid();
+      taskId = nanoid();
 
       //ensures no collision of IDs, even if the chance is really small
-    } while (!this.#taskLabels.get(id)); //get() is faster than has()
+    } while (!this.#taskLabels.get(taskId)); //get() is faster than has()
 
-    this.#taskLabels.set(id, taskLabel);
-    this.#taskArgs.set(id, args);
+    this.#taskLabels.set(taskId, taskLabel);
+    this.#taskArgs.set(taskId, args);
 
-    return id;
+    return taskId;
   }
 
   addToQueue(id: string): void {
@@ -375,12 +547,13 @@ class TaskManager {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    //the task object supplied has to have all valid properties, and empty doubly pointers
-    this.#queue.addToQueue(id);
+    //the task added to queue cannot already exist within the queue
+    this.#taskQueue.add(id);
   }
 
   getNextTaskId(): string | null {
-    return this.#queue.shiftFromQueue();
+    //if an ID is returned, it was removed from the queue on the shift
+    return this.#taskQueue.shift();
   }
 
   deleteTask(id: string): void {
@@ -392,7 +565,7 @@ class TaskManager {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    this.#queue.removeFromQueue(id);
+    this.#taskQueue.remove(id);
     this.#taskLabels.delete(id);
     this.#taskArgs.delete(id);
   }
@@ -406,8 +579,8 @@ class TaskManager {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    this.#queue.removeFromQueue(id);
-    this.#queue.addToQueue(id);
+    this.#taskQueue.remove(id);
+    this.#taskQueue.add(id);
   }
 
   getTaskLabel(id: string): string | null {
@@ -416,7 +589,7 @@ class TaskManager {
     return taskLabel ? taskLabel : null;
   }
 
-  getArgs(id: string): Array<any> | null {
+  getTaskArgs(id: string): Array<any> | null {
     const args = this.#taskArgs.get(id);
 
     return Array.isArray(args) ? [...args] : null; //return a clone of the array instead of the reference
@@ -429,9 +602,6 @@ class SmartCluster {
   //The promise ID is passed to the child, paired with the task to execute. The child process passes this same promise ID back, which allows
   //messages to main process to be associated with specific promises.
   #messagePromises = new Map();
-
-  #processQueue: ProcessQueue;
-  #taskQueue: TaskQueue;
 
   constructor(
     pageSource: string,
