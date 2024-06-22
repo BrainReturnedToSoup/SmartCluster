@@ -150,6 +150,164 @@ class ProcessQueue {
   }
 }
 
+class ProcessManager {
+  #childProcesses: Map<string, ChildProcess> = new Map<string, ChildProcess>();
+  #processQueue: ProcessQueue;
+
+  constructor(numOfProcesses: number = 0) {
+    if (typeof numOfProcesses !== "number") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (numOfProcesses <= 0) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#processQueue = new ProcessQueue(numOfProcesses);
+  }
+
+  #subscriber: Function | null = null;
+
+  #emit(
+    event: string,
+    processId: string,
+    message: Object | null = null,
+    code: number | null = null,
+    signal: string | number | null = null
+  ) {
+    if (typeof this.#subscriber !== "function") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#subscriber(event, processId, message, code, signal);
+  }
+
+  subscribe(subFunc: Function) {
+    this.#subscriber = subFunc;
+  }
+
+  #initChildProcess(processId: string, pageSource: string): Promise<any> {
+    const managerScope = this;
+
+    return new Promise((resolve, reject) => {
+      const childProcess = fork(pageSource);
+
+      childProcess.on("exit", (code, signal) => {
+        managerScope.#processQueue.remove(processId);
+
+        managerScope.#childProcesses.delete(processId);
+
+        this.#emit("exit", processId, null, code, signal);
+
+        //emit the event to alert the parent class 'SmartCluster' that a process exited, and to thus
+        //invoke the necessary apis for process and task recovery.
+      });
+
+      childProcess.on("error", (err) => {
+        reject(err);
+
+        //app breaking exception
+      });
+
+      childProcess.on("message", (message) => {
+        this.#emit("message", processId, message, null, null);
+
+        //emit the event to alert the parent class 'SmartCluster' that the process finished a task, and to
+        //thus invoke the necessary apis to either send the process on the next available task, or to add the process
+        //to the process queue
+      });
+
+      childProcess.on("spawn", () => {
+        managerScope.#childProcesses.set(processId, childProcess);
+
+        this.#emit("spawn", processId, null, null, null);
+        //emit the event to alert the parent class 'SmartCluster' that the process has spawned completely and is ready to
+        //be used, and to thus invoke the necessary apis to either give the new process a task, or to add the process to the
+        //process queue.
+
+        resolve(null); //resolves the ovearching promise, which is important for child process initialization.
+      });
+    });
+  }
+
+  async createProcess(pageSource: string) {
+    if (typeof pageSource !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    let processId: string;
+
+    do {
+      processId = nanoid();
+
+      //ensures no collision of IDs, even if the chance is really small
+    } while (!this.#childProcesses.get(processId)); //get() is faster than has()
+
+    await this.#initChildProcess(processId, pageSource);
+
+    return processId;
+  }
+
+  addToQueue(processId: string): void {
+    if (typeof processId !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (!this.#childProcesses.get(processId)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    this.#processQueue.add(processId);
+  }
+
+  getNextProcessId(): string | null {
+    return this.#processQueue.shift();
+
+    //if an ID is returned, it was removed from the queue on the shift
+  }
+
+  killProcess(processId: string): void {
+    if (typeof processId !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    const process = this.#childProcesses.get(processId);
+
+    if (!process) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    process.kill();
+  }
+
+  sendToProcess(
+    processId: string,
+    taskId: string,
+    taskLabel: string,
+    args: Array<any>
+  ): void {
+    if (typeof processId !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (typeof taskLabel !== "string") {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    if (!Array.isArray(args)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    const childProcess = this.#childProcesses.get(processId);
+
+    if (!childProcess) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
+    childProcess.send({ taskId, taskLabel, args });
+  }
+}
+
 class Task {
   id: string | null = null;
   prealloc: boolean;
@@ -334,164 +492,6 @@ class TaskQueue {
   }
 }
 
-class ProcessManager {
-  #childProcesses: Map<string, ChildProcess> = new Map<string, ChildProcess>();
-  #processQueue: ProcessQueue;
-
-  constructor(numOfProcesses: number = 0) {
-    if (typeof numOfProcesses !== "number") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (numOfProcesses <= 0) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#processQueue = new ProcessQueue(numOfProcesses);
-  }
-
-  #subscriber: Function | null = null;
-
-  #emit(
-    event: string,
-    processId: string,
-    message: Object | null = null,
-    code: number | null = null,
-    signal: string | number | null = null
-  ) {
-    if (typeof this.#subscriber !== "function") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#subscriber(event, processId, message, code, signal);
-  }
-
-  subscribe(subFunc: Function) {
-    this.#subscriber = subFunc;
-  }
-
-  #initChildProcess(processId: string, pageSource: string): Promise<any> {
-    const managerScope = this;
-
-    return new Promise((resolve, reject) => {
-      const childProcess = fork(pageSource);
-
-      childProcess.on("exit", (code, signal) => {
-        managerScope.#processQueue.remove(processId);
-
-        managerScope.#childProcesses.delete(processId);
-
-        this.#emit("exit", processId, null, code, signal);
-
-        //emit the event to alert the parent class 'SmartCluster' that a process exited, and to thus
-        //invoke the necessary apis for process and task recovery.
-      });
-
-      childProcess.on("error", (err) => {
-        reject(err);
-
-        //app breaking exception
-      });
-
-      childProcess.on("message", (message) => {
-        this.#emit("message", processId, message, null, null);
-
-        //emit the event to alert the parent class 'SmartCluster' that the process finished a task, and to
-        //thus invoke the necessary apis to either send the process on the next available task, or to add the process
-        //to the process queue
-      });
-
-      childProcess.on("spawn", () => {
-        managerScope.#childProcesses.set(processId, childProcess);
-
-        this.#emit("spawn", processId, null, null, null);
-        //emit the event to alert the parent class 'SmartCluster' that the process has spawned completely and is ready to
-        //be used, and to thus invoke the necessary apis to either give the new process a task, or to add the process to the
-        //process queue.
-
-        resolve(null); //resolves the ovearching promise, which is important for child process initialization.
-      });
-    });
-  }
-
-  async createProcess(pageSource: string) {
-    if (typeof pageSource !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    let processId: string;
-
-    do {
-      processId = nanoid();
-
-      //ensures no collision of IDs, even if the chance is really small
-    } while (!this.#childProcesses.get(processId)); //get() is faster than has()
-
-    await this.#initChildProcess(processId, pageSource);
-
-    return processId;
-  }
-
-  addToQueue(processId: string): void {
-    if (typeof processId !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (!this.#childProcesses.get(processId)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#processQueue.add(processId);
-  }
-
-  getNextProcessId(): string | null {
-    return this.#processQueue.shift();
-
-    //if an ID is returned, it was removed from the queue on the shift
-  }
-
-  killProcess(processId: string): void {
-    if (typeof processId !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    const process = this.#childProcesses.get(processId);
-
-    if (!process) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    process.kill();
-  }
-
-  sendToProcess(
-    processId: string,
-    taskId: string,
-    taskLabel: string,
-    args: Array<any>
-  ): void {
-    if (typeof processId !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (typeof taskLabel !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (!Array.isArray(args)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    const childProcess = this.#childProcesses.get(processId);
-
-    if (!childProcess) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    childProcess.send({ taskId, taskLabel, args });
-  }
-}
-
 class TaskManager {
   //for managing empty task objects and number of task objects present,
   //because options for defining preallocated tasks objects, as well as an upper limit to the
@@ -602,6 +602,9 @@ class SmartCluster {
   //The promise ID is passed to the child, paired with the task to execute. The child process passes this same promise ID back, which allows
   //messages to main process to be associated with specific promises.
   #messagePromises = new Map();
+
+  //stores important related to each process, and what task they are currently handling.
+  #processIdToTaskId: Map<string, string> = new Map<string, string>();
 
   constructor(
     pageSource: string,
