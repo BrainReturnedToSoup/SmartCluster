@@ -1,5 +1,41 @@
-import { fork, ChildProcess } from "child_process";
+import { fork, ChildProcess, Serializable } from "child_process";
 import { nanoid } from "nanoid";
+
+//mainly to catch logic-breaking type checking. This is not to be used for error-driven
+//control flow, rather to help debugging the automata state chances due to high specificity errors per error
+function checkType(arg: any, type: string): void {
+  const callbacks = {
+    string: () => {
+      if (typeof arg !== "string") {
+        throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+      }
+    },
+
+    positiveInteger: () => {
+      if (typeof arg !== "number" || arg <= 0 || Math.floor(arg) !== arg) {
+        throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+      }
+    },
+
+    function: () => {
+      if (typeof arg !== "function") {
+        throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+      }
+    },
+
+    array: () => {
+      if (!Array.isArray(arg)) {
+        throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+      }
+    },
+  };
+
+  if (!callbacks[type]) {
+    throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+  }
+
+  callbacks[type]();
+}
 
 class Process {
   //For creating doubly linked list nodes for a process queue.
@@ -24,6 +60,8 @@ class ProcessQueue {
   #processesInQueue: Map<string, Process> = new Map<string, Process>();
 
   constructor(numOfProcesses: number) {
+    checkType(numOfProcesses, "positiveInteger");
+
     for (let i = 0; i < numOfProcesses; i++) {
       this.#emptyProcessObjs.push(new Process());
     }
@@ -37,11 +75,7 @@ class ProcessQueue {
   //adds to the back of the queue, while also altering the head and tail pointers, as well as
   //the individual process instance previous and next pointers based on necessity.
   add(id: string): void {
-    if (typeof id !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-
-      //since TS transpiles to JS, this ensures runtime safety
-    }
+    checkType(id, "string");
 
     //get() is faster than has()
     if (this.#processesInQueue.get(id)) {
@@ -66,6 +100,7 @@ class ProcessQueue {
 
       //queue length is 0
     } else {
+      //works for queues with a length of 1 because the head and tail will be the same pointer
       emptyProcessObj.previous = this.#queueTail;
       this.#queueTail!.next = emptyProcessObj;
       this.#queueTail = emptyProcessObj;
@@ -82,11 +117,11 @@ class ProcessQueue {
     if (!(this.#queueHead instanceof Process)) {
       return null;
 
-      //if the queue is empty
-      //However, don't throw an error, rather return null for control flow
+      //if the queue is empty. However, don't throw an error,
+      //rather return null for control flow
     }
 
-    const headNode = this.#queueHead;
+    const shiftedNode = this.#queueHead;
 
     if (this.#queueHead === this.#queueTail) {
       this.#queueHead = this.#queueTail = null;
@@ -99,103 +134,91 @@ class ProcessQueue {
       //queue length >1
     }
 
-    const id = headNode.id;
+    const id = shiftedNode.id; //ensures usage of a copy rather than a reference
 
     this.#processesInQueue.delete(id as string);
-    this.#collectProcessObj(headNode);
+    this.#collectProcessObj(shiftedNode);
 
     return id;
   }
 
   //determines how to alter the queue to remove he supplied process instance from such.
   remove(id: string): void {
-    if (typeof id !== "number") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    checkType(id, "string");
 
-      //since TS transpiles to JS, this ensures runtime safety
-    }
+    const fetchedNode = this.#processesInQueue.get(id);
 
-    const process = this.#processesInQueue.get(id);
-
-    //get() is faster than has()
-    if (!process) {
+    if (!fetchedNode) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //to ensure that the process trying to be removed is actually in the queue
     }
 
-    if (process === this.#queueHead && process === this.#queueTail) {
+    if (fetchedNode === this.#queueHead && fetchedNode === this.#queueTail) {
       this.#queueHead = this.#queueTail = null;
 
       //if the node is both the head and tail (queue length of 1)
-    } else if (process === this.#queueHead) {
+    } else if (fetchedNode === this.#queueHead) {
       this.#queueHead = this.#queueHead.next;
       this.#queueHead!.previous = null;
 
-      //if the node is the current head
-    } else if (process === this.#queueTail) {
+      //if the node is the current head, length >1
+    } else if (fetchedNode === this.#queueTail) {
       this.#queueTail = this.#queueTail.previous;
       this.#queueTail!.next = null;
 
-      //if the node is the current tail
+      //if the node is the current tail, length >1
     } else {
-      process.previous!.next = process.next;
-      process.next!.previous = process.previous;
+      fetchedNode.previous!.next = fetchedNode.next;
+      fetchedNode.next!.previous = fetchedNode.previous;
 
-      //if the node is in the middle of the queue
+      //if the node is in the middle of the queue, length >2
     }
 
     this.#processesInQueue.delete(id);
-    this.#collectProcessObj(process);
+    this.#collectProcessObj(fetchedNode);
   }
 }
 
 class ProcessManager {
   #childProcesses: Map<string, ChildProcess> = new Map<string, ChildProcess>();
   #processQueue: ProcessQueue;
+  #subscriber: Function | null = null;
 
-  constructor(numOfProcesses: number = 0) {
-    if (typeof numOfProcesses !== "number") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (numOfProcesses <= 0) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  constructor(numOfProcesses: number) {
+    checkType(numOfProcesses, "positiveInteger");
 
     this.#processQueue = new ProcessQueue(numOfProcesses);
   }
 
-  #subscriber: Function | null = null;
-
+  //uses null args in order to avoid say using an object and thus reading optional properties.
+  //This means the args will be allocated on the stack unless explicitly an object argument.
+  //Trying to reduce object creation where I can.
   #emit(
     event: string,
     processId: string,
-    message: Object | null = null,
+    message: Serializable | null = null,
     code: number | null = null,
     signal: string | number | null = null
-  ) {
-    if (typeof this.#subscriber !== "function") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  ): void {
+    //only checking this value, because it will be for proper state checking of the encompassing state machine.
+    checkType(this.#subscriber, "function");
 
-    this.#subscriber(event, processId, message, code, signal);
+    (this.#subscriber as Function)(event, processId, message, code, signal);
   }
 
-  subscribe(subFunc: Function) {
-    this.#subscriber = subFunc;
-  }
+  #initChildProcess(processId: string, pageSource: string): Promise<null> {
+    checkType(processId, "string");
+    checkType(pageSource, "string");
 
-  #initChildProcess(processId: string, pageSource: string): Promise<any> {
-    const managerScope = this;
+    const classScope = this;
 
     return new Promise((resolve, reject) => {
       const childProcess = fork(pageSource);
 
       childProcess.on("exit", (code, signal) => {
-        managerScope.#processQueue.remove(processId);
-
-        managerScope.#childProcesses.delete(processId);
+        classScope.#processQueue.remove(processId);
+        classScope.#childProcesses.delete(processId);
 
         this.#emit("exit", processId, null, code, signal);
 
@@ -204,9 +227,7 @@ class ProcessManager {
       });
 
       childProcess.on("error", (err) => {
-        reject(err);
-
-        //app breaking exception
+        reject(err); //app breaking exception
       });
 
       childProcess.on("message", (message) => {
@@ -218,7 +239,7 @@ class ProcessManager {
       });
 
       childProcess.on("spawn", () => {
-        managerScope.#childProcesses.set(processId, childProcess);
+        classScope.#childProcesses.set(processId, childProcess);
 
         this.#emit("spawn", processId, null, null, null);
         //emit the event to alert the parent class 'SmartCluster' that the process has spawned completely and is ready to
@@ -230,10 +251,14 @@ class ProcessManager {
     });
   }
 
-  async createProcess(pageSource: string) {
-    if (typeof pageSource !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  subscribe(subFunc: Function): void {
+    checkType(subFunc, "function");
+
+    this.#subscriber = subFunc;
+  }
+
+  async createProcess(pageSource: string): Promise<string> {
+    checkType(pageSource, "string");
 
     let processId: string;
 
@@ -248,10 +273,20 @@ class ProcessManager {
     return processId;
   }
 
-  addToQueue(processId: string): void {
-    if (typeof processId !== "string") {
+  killProcess(processId: string): void {
+    checkType(processId, "string");
+
+    const process = this.#childProcesses.get(processId);
+
+    if (!process) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
+
+    process.kill();
+  }
+
+  addToQueue(processId: string): void {
+    checkType(processId, "string");
 
     if (!this.#childProcesses.get(processId)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
@@ -266,37 +301,16 @@ class ProcessManager {
     //if an ID is returned, it was removed from the queue on the shift
   }
 
-  killProcess(processId: string): void {
-    if (typeof processId !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    const process = this.#childProcesses.get(processId);
-
-    if (!process) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    process.kill();
-  }
-
   sendToProcess(
     processId: string,
     taskId: string,
     taskLabel: string,
     args: Array<any>
   ): void {
-    if (typeof processId !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (typeof taskLabel !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (!Array.isArray(args)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+    checkType(processId, "string");
+    checkType(taskId, "string");
+    checkType(taskLabel, "string");
+    checkType(args, "array");
 
     const childProcess = this.#childProcesses.get(processId);
 
