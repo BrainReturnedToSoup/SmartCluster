@@ -4,26 +4,26 @@ import { nanoid } from "nanoid";
 //mainly to catch logic-breaking type checking. This is not to be used for error-driven
 //control flow, rather to help debugging the automata state chances due to high specificity errors per error
 function checkType(arg: any, type: string): void {
-  const callbacks = {
-    string: () => {
+  const callbacks: Record<string, () => void> = {
+    string: (): void => {
       if (typeof arg !== "string") {
         throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
       }
     },
 
-    positiveInteger: () => {
+    positiveInteger: (): void => {
       if (typeof arg !== "number" || arg <= 0 || Math.floor(arg) !== arg) {
         throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
       }
     },
 
-    function: () => {
+    function: (): void => {
       if (typeof arg !== "function") {
         throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
       }
     },
 
-    array: () => {
+    array: (): void => {
       if (!Array.isArray(arg)) {
         throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
       }
@@ -68,6 +68,10 @@ class ProcessQueue {
   }
 
   #collectProcessObj(process: Process): void {
+    if (!(process instanceof Process)) {
+      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
+    }
+
     process.clearAll();
     this.#emptyProcessObjs.push(process);
   }
@@ -327,13 +331,12 @@ class ProcessManager {
 
 class Task {
   id: string | null = null;
-  prealloc: boolean;
-
+  isPreallocated: boolean;
   next: Task | null = null;
   previous: Task | null = null;
 
-  constructor(preallocFlag: boolean) {
-    this.prealloc = preallocFlag;
+  constructor(isPreallocated: boolean) {
+    this.isPreallocated = isPreallocated;
   }
 
   clearIdAndPointers(): void {
@@ -349,32 +352,49 @@ class TaskQueue {
   #queueTail: Task | null = null;
 
   #emptyTaskObjs: Task[] = [];
-  #preallocObjs: number;
+  #preallocatedObjs: number;
   #maxObjs: number;
-  #currObjs: number = 0;
+  #currSumOfObjs: number = 0;
 
   #tasksInQueue: Map<string, Task> = new Map<string, Task>();
 
-  constructor(preallocObjs: number = 0, maxObjs: number = 0) {
-    if (typeof preallocObjs !== "number") {
+  constructor(preallocatedObjs: number = 0, maxObjs: number = 0) {
+    checkType(preallocatedObjs, "positiveInteger");
+    checkType(maxObjs, "positiveInteger");
+
+    if (preallocatedObjs > maxObjs) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (typeof maxObjs !== "number") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#preallocObjs = preallocObjs;
+    this.#preallocatedObjs = preallocatedObjs;
     this.#maxObjs = maxObjs;
 
-    for (let i = 0; i < this.#preallocObjs; i++) {
+    for (let i = 0; i < this.#preallocatedObjs; i++) {
       this.#emptyTaskObjs.push(new Task(true));
-      this.#currObjs++;
+      this.#currSumOfObjs++;
+    }
+  }
+
+  #collectTaskObj(task: Task): void {
+    if (!(task instanceof Task)) {
+      throw new Error();
+    }
+
+    task.clearIdAndPointers();
+
+    if (task.isPreallocated) {
+      this.#emptyTaskObjs.push(task);
+
+      //means the task object supplied was an original preallocated object, so return
+      //it to the empty task object array for a better chance at cache locality optimization.
+    } else {
+      this.#currSumOfObjs--;
+      //means the current objects value has to be greater than the preallocated objects value
     }
   }
 
   #getTaskObj(): Task {
-    if (this.#currObjs >= this.#maxObjs) {
+    if (this.#currSumOfObjs >= this.#maxObjs) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //in the case that the current number of task objects will exceed the max limit if another were to be created.
@@ -391,7 +411,7 @@ class TaskQueue {
     } else {
       const created = new Task(false);
 
-      this.#currObjs++;
+      this.#currSumOfObjs++;
 
       return created;
 
@@ -400,31 +420,11 @@ class TaskQueue {
     }
   }
 
-  #collectTaskObj(task: Task): void {
-    if (!(task instanceof Task)) {
-      throw new Error();
-    }
-
-    task.clearIdAndPointers();
-
-    if (task.prealloc) {
-      this.#emptyTaskObjs.push(task);
-
-      //means the task object supplied was an original preallocated object, so return
-      //it to the empty task object array for a better chance at cache locality optimization.
-    } else {
-      this.#currObjs--;
-      //means the current objects value has to be greater than the preallocated objects value
-    }
-  }
-
-  add(id: string): void {
-    if (typeof id !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  add(taskId: string): void {
+    checkType(taskId, "string");
 
     //get() is faster than has()
-    if (this.#tasksInQueue.get(id)) {
+    if (this.#tasksInQueue.get(taskId)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
@@ -442,7 +442,7 @@ class TaskQueue {
       //queue length >0
     }
 
-    this.#tasksInQueue.set(id, taskObj);
+    this.#tasksInQueue.set(taskId, taskObj);
   }
 
   shift(): string | null {
@@ -472,12 +472,10 @@ class TaskQueue {
     return head.id;
   }
 
-  remove(id: string): void {
-    if (typeof id !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  remove(taskId: string): void {
+    checkType(taskId, "string");
 
-    const task = this.#tasksInQueue.get(id);
+    const task = this.#tasksInQueue.get(taskId);
 
     if (!task) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
@@ -504,7 +502,7 @@ class TaskQueue {
       //if the node is in the middle of the queue
     }
 
-    this.#tasksInQueue.delete(id);
+    this.#tasksInQueue.delete(taskId);
     this.#collectTaskObj(task);
   }
 }
@@ -518,27 +516,21 @@ class TaskManager {
   #taskArgs: Map<string, Array<any>> = new Map<string, Array<any>>();
   #taskQueue: TaskQueue;
 
-  constructor(preallocObjs: number, maxObjs: number) {
-    if (preallocObjs < 0) {
+  constructor(preallocatedObjs: number, maxObjs: number) {
+    checkType(preallocatedObjs, "positiveInteger");
+    checkType(maxObjs, "positiveInteger");
+
+    if (maxObjs < preallocatedObjs) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (maxObjs < preallocObjs) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#taskQueue = new TaskQueue(preallocObjs, maxObjs);
+    this.#taskQueue = new TaskQueue(preallocatedObjs, maxObjs);
   }
 
   //returns the id string corresponding to the created task
   createTask(taskLabel: string, args: Array<any>): string {
-    if (typeof taskLabel !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    if (!Array.isArray(args)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+    checkType(taskLabel, "string");
+    checkType(args, "array");
 
     let taskId: string;
 
@@ -554,18 +546,16 @@ class TaskManager {
     return taskId;
   }
 
-  addToQueue(id: string): void {
-    if (typeof id !== "string") {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
+  addToQueue(taskId: string): void {
+    checkType(taskId, "string");
 
     //get() is faster than has()
-    if (!this.#taskLabels.get(id)) {
+    if (!this.#taskLabels.get(taskId)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
     //the task added to queue cannot already exist within the queue
-    this.#taskQueue.add(id);
+    this.#taskQueue.add(taskId);
   }
 
   getNextTaskId(): string | null {
@@ -573,41 +563,41 @@ class TaskManager {
     return this.#taskQueue.shift();
   }
 
-  deleteTask(id: string): void {
-    if (typeof id !== "string") {
+  deleteTask(taskId: string): void {
+    checkType(taskId, "string");
+
+    if (!this.#taskLabels.get(taskId)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (!this.#taskLabels.get(id)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#taskQueue.remove(id);
-    this.#taskLabels.delete(id);
-    this.#taskArgs.delete(id);
+    this.#taskQueue.remove(taskId);
+    this.#taskLabels.delete(taskId);
+    this.#taskArgs.delete(taskId);
   }
 
-  requeueTask(id: string): void {
-    if (typeof id !== "string") {
+  requeueTask(taskId: string): void {
+    checkType(taskId, "string");
+
+    if (!this.#taskLabels.get(taskId)) {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
     }
 
-    if (!this.#taskLabels.get(id)) {
-      throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
-    }
-
-    this.#taskQueue.remove(id);
-    this.#taskQueue.add(id);
+    this.#taskQueue.remove(taskId);
+    this.#taskQueue.add(taskId);
   }
 
-  getTaskLabel(id: string): string | null {
-    const taskLabel = this.#taskLabels.get(id);
+  getTaskLabel(taskId: string): string | null {
+    checkType(taskId, "string");
+
+    const taskLabel = this.#taskLabels.get(taskId);
 
     return taskLabel ? taskLabel : null;
   }
 
-  getTaskArgs(id: string): Array<any> | null {
-    const args = this.#taskArgs.get(id);
+  getTaskArgs(taskId: string): Array<any> | null {
+    checkType(taskId, "string");
+
+    const args = this.#taskArgs.get(taskId);
 
     return Array.isArray(args) ? [...args] : null; //return a clone of the array instead of the reference
   }
