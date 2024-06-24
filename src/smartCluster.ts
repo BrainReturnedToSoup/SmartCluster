@@ -186,13 +186,16 @@ class ProcessQueue {
 }
 
 class ProcessManager {
+  #pageSource: string;
   #childProcesses: Map<string, ChildProcess> = new Map<string, ChildProcess>();
   #processQueue: ProcessQueue;
   #subscriber: Function | null = null;
 
-  constructor(numOfProcesses: number) {
+  constructor(pageSource: string, numOfProcesses: number) {
+    checkType(pageSource, "string");
     checkType(numOfProcesses, "positiveInteger");
 
+    this.#pageSource = pageSource;
     this.#processQueue = new ProcessQueue(numOfProcesses);
   }
 
@@ -213,14 +216,15 @@ class ProcessManager {
     (this.#subscriber as Function)(event, processId, message, code, signal);
   }
 
-  #initChildProcess(processId: string, pageSource: string): Promise<null> {
+  #initChildProcess(processId: string): Promise<null> {
     checkType(processId, "string");
-    checkType(pageSource, "string");
 
     const classScope = this;
 
     return new Promise((resolve, reject) => {
-      const childProcess = fork(pageSource);
+      const childProcess = fork(classScope.#pageSource);
+
+      this.#childProcesses.set(processId, childProcess);
 
       childProcess.on("exit", (code, signal) => {
         classScope.#processQueue.remove(processId);
@@ -246,8 +250,6 @@ class ProcessManager {
       });
 
       childProcess.on("spawn", () => {
-        classScope.#childProcesses.set(processId, childProcess);
-
         this.#emit("spawn", processId, null, null, null);
         //emit the event to alert the parent class 'SmartCluster' that the process has spawned completely and is ready to
         //be used, and to thus invoke the necessary apis to either give the new process a task, or to add the process to the
@@ -264,9 +266,7 @@ class ProcessManager {
     this.#subscriber = subFunc;
   }
 
-  async createProcess(pageSource: string): Promise<string> {
-    checkType(pageSource, "string");
-
+  async createProcess(): Promise<string> {
     let processId: string;
 
     do {
@@ -275,7 +275,7 @@ class ProcessManager {
       //ensures no collision of IDs, even if the chance is really small
     } while (!this.#childProcesses.get(processId)); //get() is faster than has()
 
-    await this.#initChildProcess(processId, pageSource);
+    await this.#initChildProcess(processId);
 
     return processId; //will be used by the encompassing smart cluster class for identification matching of events emitted.
   }
@@ -608,15 +608,40 @@ class SmartCluster {
   //automatically managing load balancing. The key is the arbitrary promise ID, and the value is the promise APIs resolve and reject.
   //The promise ID is passed to the child, paired with the task to execute. The child process passes this same promise ID back, which allows
   //messages to main process to be associated with specific promises.
-  #messagePromises = new Map();
+  #messagePromises: Map<string, Promise<any>> = new Map();
 
-  //stores important related to each process, and what task they are currently handling.
+  //stores the semantics between a process and what task it is currently handling.
   #processIdToTaskId: Map<string, string> = new Map<string, string>();
+
+  #processManager: ProcessManager;
+  #taskManager: TaskManager;
 
   constructor(
     pageSource: string,
     numOfProcesses: number,
-    preallocObjs: number,
-    maxallocObjs: number
+    preallocatedObjs: number,
+    maxObjs: number
+  ) {
+    this.#processManager = new ProcessManager(pageSource, numOfProcesses);
+    this.#taskManager = new TaskManager(preallocatedObjs, maxObjs);
+
+    //since this operation is synchronous, it will occur prior to the execution of the callbacks supplied
+    //to the event emitters returned from fork.
+    this.#processManager.subscribe(this.#listener.bind(this));
+  }
+
+  //acts as the entrypoint for listening to events emitted from the child process event emitters.
+  //This will be important for choreographing necessary state behaviors, such as auto creating a new process
+  //after a previous process crashed. The course of action is defined conditionally using the supplied args.
+  #listener(
+    event: string,
+    processId: string,
+    message: Serializable | null = null,
+    code: number | null = null,
+    signal: string | number | null = null
   ) {}
+
+  async sendTask(taskLabel: string, args: Array<any>): Promise<any> {
+    
+  }
 }
