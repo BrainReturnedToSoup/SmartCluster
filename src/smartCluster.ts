@@ -91,6 +91,7 @@ class ProcessQueue {
       throw new Error(); //STILL NEED TO ADD CUSTOM ERROR
 
       //if this throws, this shows a larger logical error from the source using this api
+      //because there is a mismatch in perceived number of processes between the process manager and this queue
     }
 
     emptyProcessObj.id = id;
@@ -100,7 +101,7 @@ class ProcessQueue {
 
       //queue length is 0
     } else {
-      //works for queues with a length of 1 because the head and tail will be the same pointer
+      //works for queues with a length of 1 because the head and tail will be a reference to the same single node
       emptyProcessObj.previous = this.#queueTail;
       this.#queueTail!.next = emptyProcessObj;
       this.#queueTail = emptyProcessObj;
@@ -162,17 +163,17 @@ class ProcessQueue {
       this.#queueHead = this.#queueHead.next;
       this.#queueHead!.previous = null;
 
-      //if the node is the current head, length >1
+      //if the node is the current head (length >1)
     } else if (fetchedNode === this.#queueTail) {
       this.#queueTail = this.#queueTail.previous;
       this.#queueTail!.next = null;
 
-      //if the node is the current tail, length >1
+      //if the node is the current tail (length >1)
     } else {
       fetchedNode.previous!.next = fetchedNode.next;
       fetchedNode.next!.previous = fetchedNode.previous;
 
-      //if the node is in the middle of the queue, length >2
+      //if the node is in the middle of the queue (length >2)
     }
 
     this.#processesInQueue.delete(id);
@@ -202,6 +203,7 @@ class ProcessManager {
     signal: string | number | null = null
   ): void {
     //only checking this value, because it will be for proper state checking of the encompassing state machine.
+    //also, the other args are checked in the #initChildProcess method anyway
     checkType(this.#subscriber, "function");
 
     (this.#subscriber as Function)(event, processId, message, code, signal);
@@ -223,7 +225,8 @@ class ProcessManager {
         this.#emit("exit", processId, null, code, signal);
 
         //emit the event to alert the parent class 'SmartCluster' that a process exited, and to thus
-        //invoke the necessary apis for process and task recovery.
+        //invoke the necessary apis for process and task recovery. This should cover all cases where a process exits,
+        //which includes crashes.
       });
 
       childProcess.on("error", (err) => {
@@ -234,8 +237,8 @@ class ProcessManager {
         this.#emit("message", processId, message, null, null);
 
         //emit the event to alert the parent class 'SmartCluster' that the process finished a task, and to
-        //thus invoke the necessary apis to either send the process on the next available task, or to add the process
-        //to the process queue
+        //thus invoke the necessary apis to either send the corresponding process on the next available task, or to add the process
+        //to the process queue.
       });
 
       childProcess.on("spawn", () => {
@@ -270,7 +273,7 @@ class ProcessManager {
 
     await this.#initChildProcess(processId, pageSource);
 
-    return processId;
+    return processId; //will be used by the encompassing smart cluster class for identification matching of events emitted.
   }
 
   killProcess(processId: string): void {
